@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/gomodule/redigo v1.8.5
+	github.com/google/uuid v1.3.0
 	github.com/sirupsen/logrus v1.8.1
 )
 

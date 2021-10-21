@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"github.com/gomodule/redigo/redis"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"reflect"
 	"regexp"
@@ -29,17 +30,27 @@ func (rf *rgxFlag) Set(s string) (err error) {
 	return
 }
 
+var redMonAddr = regexp.MustCompile(`\A.+? \[\d+ (.+)] `)
+
 func main() {
 	m := &rgxFlag{}
 	r := flag.String("r", "127.0.0.1:6379", "HOST:PORT")
 	w := flag.String("w", "", "REDIS COMMAND")
 	wg := &sync.WaitGroup{}
+	var watcherId string
 
 	flag.Var(m, "m", "REGEX")
 	flag.Parse()
 	log.SetLevel(log.TraceLevel)
 
 	if *w != "" {
+		uid, err := uuid.NewRandom()
+		if err != nil {
+			panic(err)
+		}
+
+		watcherId = uid.String()
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -54,6 +65,10 @@ func main() {
 
 			cn, err := redis.Dial("tcp", *r)
 			if err != nil {
+				panic(err)
+			}
+
+			if _, err := cn.Do("GET", watcherId); err != nil {
 				panic(err)
 			}
 
@@ -85,14 +100,29 @@ func main() {
 				panic(err)
 			}
 
+			var watcher string
 			for {
 				resp, err := cn.Receive()
 				if err != nil {
 					panic(err)
 				}
 
-				if m.rgx.MatchString(resp.(string)) {
-					log.Debug(resp)
+				rs := resp.(string)
+				if watcher == "" && watcherId != "" && strings.Contains(rs, watcherId) {
+					if match := redMonAddr.FindStringSubmatch(rs); match != nil {
+						watcher = match[1]
+						continue
+					}
+				}
+
+				if watcher != "" {
+					if match := redMonAddr.FindStringSubmatch(rs); match != nil && match[1] == watcher {
+						continue
+					}
+				}
+
+				if m.rgx.MatchString(rs) {
+					log.Debug(rs)
 				}
 			}
 		}()
